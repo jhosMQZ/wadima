@@ -14,6 +14,7 @@
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vite.dev/)
 [![Phaser](https://img.shields.io/badge/Phaser-3.90-8B5CF6)](https://phaser.io/)
 [![MCP](https://img.shields.io/badge/MCP-servidor_propio-D97757)](https://modelcontextprotocol.io/)
+[![Licencia](https://img.shields.io/badge/Licencia-AGPL--3.0-A42E2B)](LICENSE)
 
 [Características](#características) · [Capturas](#capturas) · [Inicio rápido](#inicio-rápido) · [Arquitectura](#arquitectura) · [Documentación](#documentación)
 
@@ -222,3 +223,14 @@ python manage.py test --e2e    # además, compila y ejecuta Playwright
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Modelo de amenazas, aislamiento de Studio, acceso remoto y secretos |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Estado por fases, resultados de las pruebas y pendientes |
 | [`docs/ENVIRONMENT_AUDIT.md`](docs/ENVIRONMENT_AUDIT.md) | Entorno de referencia y decisiones derivadas |
+
+## Licencia
+
+Copyright © 2026 jhosMQZ.
+
+WADIMA es software libre: puedes usarlo, estudiarlo, modificarlo y redistribuirlo bajo los términos de la
+[GNU Affero General Public License v3.0](LICENSE). Si lo modificas y lo ofreces a otras personas, también a través
+de la red, debes publicar el código fuente de tu versión con la misma licencia. Se distribuye sin ninguna garantía.
+
+Las dependencias conservan sus propias licencias; por ejemplo, PyMuPDF (conversión de PDF) se distribuye bajo
+AGPL-3.0 o licencia comercial de Artifex.

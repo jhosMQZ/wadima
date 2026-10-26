@@ -1,6 +1,8 @@
 [project]
 name = "wadima"
 version = "0.1.0"
+license = "AGPL-3.0-only"
+license-files = ["../LICENSE"]
 description = "WADIMA - workspace colaborativo local-first con oficina virtual pixel art"
 requires-python = ">=3.12,<3.14"
 dependencies = [
