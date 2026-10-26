@@ -88,3 +88,12 @@ export function locatorText(loc: Record<string, unknown>): string {
   if (loc.slide) parts.push(`diapositiva ${loc.slide}`);
   return parts.length ? `(${parts.join(", ")})` : "";
 }
+
+/** Estado de una credencial de IA (Claude, OpenAI, Gemini, DeepSeek, compatibles). */
+export const CRED_STATUS: Record<string, [string, string]> = {
+  verified: ["verificada", "ok"],
+  unverified: ["sin verificar", "warn"],
+  error: ["error", "err"],
+  revoked: ["eliminada", "muted"],
+  not_configured: ["sin configurar", "muted"],
+};

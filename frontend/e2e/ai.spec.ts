@@ -146,3 +146,29 @@ test("asignar una tarea de proyecto a la IA de otro socio y verla en la oficina"
   await expect(page.getByRole("dialog")).toContainText("¡Bienvenidos a la campaña!");
   await ctx.close();
 });
+
+test("otras APIs de IA: una tarjeta por proveedor y validación local de la clave", async ({ page }) => {
+  await loginAndEnter(page, "socio3");
+  await page.goto("/ai");
+  const options = page.getByTestId("ai-options");
+  await expect(options).toContainText("Otras APIs");
+  await expect(options).toContainText("DeepSeek");
+  for (const id of ["openai_api", "gemini_api", "deepseek_api", "openai_compatible"]) {
+    await expect(page.getByTestId(`api-${id}`)).toContainText("sin configurar");
+  }
+  // Una clave de Anthropic en la tarjeta de OpenAI se rechaza antes de llamar a ningún servicio
+  const openai = page.getByTestId("api-openai_api");
+  await openai.getByLabel("API key de OpenAI").fill("sk-ant-api03-esta-clave-es-de-anthropic-XXXX");
+  await openai.getByRole("button", { name: "Guardar y verificar" }).click();
+  await expect(openai).toContainText("Esa clave es de Anthropic");
+  // Una API compatible no puede apuntar a la red interna
+  const compat = page.getByTestId("api-openai_compatible");
+  await compat.getByLabel("Dirección de la API").fill("https://192.168.1.10/v1");
+  await compat.getByLabel("API key de API compatible con OpenAI").fill("clave-de-prueba");
+  await compat.getByRole("button", { name: "Guardar y verificar" }).click();
+  await expect(compat).toContainText("red interna");
+  await expect(page.getByTestId("api-openai_compatible")).toContainText("sin configurar");
+  // Sin ninguna IA verificada, el laboratorio lo explica
+  await page.goto("/agents");
+  await expect(page.getByText("Conecte su propia cuenta de Claude u otra IA")).toBeVisible();
+});

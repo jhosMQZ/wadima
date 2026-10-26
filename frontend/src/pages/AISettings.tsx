@@ -8,6 +8,7 @@ import { RUN_STATUS } from "../lib/labels";
 import { toast } from "../lib/toast";
 import { useApi } from "../lib/useApi";
 import { ClaudeConnections } from "./ClaudeConnections";
+import { OtherApis } from "./OtherApis";
 
 interface McpToken {
   id: string;
@@ -30,6 +31,7 @@ interface Options {
     tokens: McpToken[];
   };
   manual_import: { status: string };
+  other_apis: { provider: string; label: string; status: string; key_hint: string | null }[];
 }
 
 interface RunRow {
@@ -64,8 +66,8 @@ export default function AISettingsPage() {
         <div className="grow">
           <h1>Configuración de IA</h1>
           <p>
-            Cada socio conecta su propia cuenta de Claude. WADIMA funciona sin IA y nunca comparte
-            credenciales entre socios.
+            Cada socio conecta su propia cuenta de Claude u otras IA (OpenAI, Gemini, DeepSeek o APIs
+            compatibles). WADIMA funciona sin IA y nunca comparte credenciales entre socios.
           </p>
         </div>
       </div>
@@ -77,6 +79,8 @@ export default function AISettingsPage() {
           <SubscriptionPanel opts={opts.data} onChange={() => opts.reload()} />
           <h2>API de Anthropic (clave propia)</h2>
           <ClaudeConnections />
+          <h2>Otras APIs de IA (clave propia)</h2>
+          <OtherApis />
         </>
       )}
     </>
@@ -131,6 +135,34 @@ function Alternatives({ opts }: { opts: Options }) {
               <td className="small">Pago por uso, aparte de la suscripción.</td>
               <td>
                 <Badge tone={apiTone}>{apiLabel}</Badge>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <strong>Otras APIs</strong> (OpenAI, Google Gemini, DeepSeek o compatibles con OpenAI)
+              </td>
+              <td className="small">
+                API key propia del servicio. Las compatibles (OpenRouter, Groq, Mistral…) necesitan además su
+                dirección https; Ollama o LM Studio en el equipo de WADIMA, un administrador.
+              </td>
+              <td className="small">
+                Las mismas preguntas con contexto de la memoria que con Claude. El recuento de tokens sin
+                generar respuesta solo existe en Anthropic y Gemini.
+              </td>
+              <td className="small">
+                Pago por uso en cada servicio (las suscripciones de chat no incluyen la API).
+              </td>
+              <td>
+                <span className="stack" style={{ gap: 4 }}>
+                  {opts.other_apis.map((a) => {
+                    const [l, t] = API_STATUS[a.status] ?? [a.status, "info"];
+                    return (
+                      <span key={a.provider} className="small">
+                        {a.label}: <Badge tone={t}>{l}</Badge>
+                      </span>
+                    );
+                  })}
+                </span>
               </td>
             </tr>
             <tr>

@@ -43,7 +43,7 @@ usuario. El nombre de la organización, el logotipo, los colores y la zona horar
 | 🏢 **Oficina virtual** | Siete salas en pixel art, avatares con el estado real de cada persona, movimiento con el ratón o las flechas y zoom automático a la sala a la que vas. |
 | ⏱️ **Control horario** | Entradas y salidas con la hora del servidor, jornadas incompletas, aprobaciones, totales por día, semana y mes, y exportación a CSV y Excel. Un robot recoge cada registro en la oficina. |
 | 🎙️ **Reuniones con audio** | Audio en tiempo real entre socios (WebRTC) con indicador de quién habla. No se graba nada. |
-| 🤖 **IA de cada socio** | Cada uno conecta su Claude: su suscripción mediante Claude Code y MCP, o su API key. Las tareas de un proyecto se asignan a una persona o a la IA de un socio, y cada Claude tiene su avatar en el Laboratorio de IA. |
+| 🤖 **IA de cada socio** | Cada uno conecta su Claude: su suscripción mediante Claude Code y MCP, o su API key. También puede usar sus propias claves de OpenAI, Google Gemini, DeepSeek o cualquier API compatible con OpenAI (OpenRouter, Groq, Ollama…). Las tareas de un proyecto se asignan a una persona o a la IA de un socio, y cada Claude tiene su avatar en el Laboratorio de IA. |
 | 📋 **Proyectos y notas** | Tareas, responsables, comentarios, actividad y edición simultánea con fusión de cambios. |
 | 📚 **Biblioteca y memoria** | Sube documentos o carpetas enteras. PDF, Word, Excel y PowerPoint se convierten a Markdown, y el Memory Agent responde citando sus fuentes. |
 | 💻 **Project Studio** | Editor, Git, ejecución aislada y Live Preview compartida. Puedes importar tus proyectos desde una carpeta o un ZIP. |
@@ -149,7 +149,7 @@ flowchart LR
     NAV <-. "audio WebRTC" .-> NAV2["Navegador de otro socio"]
     CC["Claude Code de cada socio"] -- "MCP con token personal" --> API
     API -. opcional .-> GD["Google Drive"]
-    API -. opcional .-> AN["API de Anthropic"]
+    API -. opcional .-> AN["APIs de IA<br/>Anthropic · OpenAI · Gemini · DeepSeek"]
 ```
 
 | Capa | Tecnología |
@@ -219,7 +219,7 @@ python manage.py test --e2e    # además, compila y ejecuta Playwright
 | Documento | Contenido |
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Módulos, modelo de datos, tiempo real y despliegue entre socios |
-| [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) | Google Drive, Claude (suscripción vía MCP o API key) y tareas para la IA |
+| [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) | Google Drive, Claude (suscripción vía MCP o API key), otras APIs de IA y tareas para la IA |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Modelo de amenazas, aislamiento de Studio, acceso remoto y secretos |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Estado por fases, resultados de las pruebas y pendientes |
 | [`docs/ENVIRONMENT_AUDIT.md`](docs/ENVIRONMENT_AUDIT.md) | Entorno de referencia y decisiones derivadas |

@@ -16,6 +16,7 @@ interface Run {
   id: string;
   user_id: string;
   provider: string;
+  provider_label?: string;
   model: string;
   prompt: string;
   output: string;
@@ -54,14 +55,14 @@ export default function AgentsPage() {
         <div className="grow">
           <h1>Laboratorio de IA</h1>
           <p>
-            Claude con la cuenta de cada socio, contexto de la memoria compartida y estado real de los agentes
-            internos. Las opciones de conexión están en <Link to="/ai">Configuración de IA</Link>.
+            Claude u otras IA con la cuenta de cada socio, contexto de la memoria compartida y estado real de
+            los agentes internos. Las opciones de conexión están en <Link to="/ai">Configuración de IA</Link>.
           </p>
         </div>
       </div>
       <Tabs
         tabs={[
-          { key: "claude", label: "Preguntar a Claude" },
+          { key: "claude", label: "Preguntar a la IA" },
           { key: "history", label: "Ejecuciones" },
           { key: "agents", label: "Agentes internos" },
           { key: "import", label: "Importar resultado" },
@@ -88,13 +89,16 @@ function AskClaude() {
     use_memory: true,
     effort: "medium",
     model: "",
+    provider: "",
   });
   const projects = useApi<ProjectRow[]>(form.area_id ? `/api/projects?area_id=${form.area_id}` : null);
   const [run, setRun] = useState<(Run & { contradictions?: { detail: string }[] }) | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const mine = creds.data?.mine;
-  const ready = mine?.status === "verified";
+  const usable = (creds.data?.providers ?? []).filter((c) => c.status === "verified");
+  const ready = usable.length > 0;
+  const mine = usable.find((c) => c.provider === form.provider) ?? usable[0];
+  const meta = creds.data?.catalog.find((m) => m.key === mine?.provider);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -109,6 +113,7 @@ function AskClaude() {
         use_memory: form.use_memory,
         effort: form.effort,
         model: form.model || null,
+        provider: mine?.provider ?? null,
       });
       setRun(res);
     } catch (err) {
@@ -127,10 +132,10 @@ function AskClaude() {
   if (!creds.data) return <Spinner />;
   if (!ready) {
     return (
-      <EmptyState title="Conecte su propia cuenta de Claude">
-        Para preguntar a Claude desde aquí necesita una API key de Anthropic verificada. Con una suscripción
-        Pro/Max puede encargar tareas a su propio Claude Code mediante MCP.{" "}
-        <Link to="/ai">Ir a Configuración de IA</Link>
+      <EmptyState title="Conecte su propia cuenta de Claude u otra IA">
+        Para preguntar desde aquí necesita una API key verificada de Anthropic, OpenAI, Gemini, DeepSeek o un
+        servicio compatible. Con una suscripción Pro/Max puede encargar tareas a su propio Claude Code
+        mediante MCP. <Link to="/ai">Ir a Configuración de IA</Link>
       </EmptyState>
     );
   }
@@ -179,6 +184,20 @@ function AskClaude() {
           </label>
         </div>
         <div className="row">
+          <label className="field">
+            IA
+            <select
+              value={mine!.provider}
+              aria-label="Proveedor de IA"
+              onChange={(e) => setForm({ ...form, provider: e.target.value, model: "" })}
+            >
+              {usable.map((c) => (
+                <option key={c.provider} value={c.provider}>
+                  {c.provider_label}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="field" style={{ flex: 1 }}>
             Modelo
             <select value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}>
@@ -190,16 +209,18 @@ function AskClaude() {
               ))}
             </select>
           </label>
-          <label className="field">
-            Esfuerzo
-            <select value={form.effort} onChange={(e) => setForm({ ...form, effort: e.target.value })}>
-              {["low", "medium", "high", "xhigh", "max"].map((x) => (
-                <option key={x} value={x}>
-                  {x}
-                </option>
-              ))}
-            </select>
-          </label>
+          {meta?.supports_effort && (
+            <label className="field">
+              Esfuerzo
+              <select value={form.effort} onChange={(e) => setForm({ ...form, effort: e.target.value })}>
+                {["low", "medium", "high", "xhigh", "max"].map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
         <label className="inline">
           <input
@@ -210,11 +231,11 @@ function AskClaude() {
           Usar la memoria compartida como contexto (solo áreas a las que tengo acceso)
         </label>
         <button className="primary" disabled={busy}>
-          {busy ? "Consultando a Claude…" : "Enviar con mi cuenta"}
+          {busy ? `Consultando a ${meta?.short ?? "la IA"}…` : "Enviar con mi cuenta"}
         </button>
         <p className="small faint">
           El resultado es privado hasta que usted lo comparta. Los fragmentos recuperados se envían como datos
-          no confiables y Claude no recibe herramientas ni permisos.
+          no confiables y el modelo no recibe herramientas ni permisos.
         </p>
       </form>
       <div className="panel">
@@ -252,6 +273,9 @@ function RunView({
         >
           {RUN_STATUS[run.status] ?? run.status}
         </Badge>
+        {run.provider_label && !["manual_import", "claude_mcp"].includes(run.provider) && (
+          <Badge tone="info">{run.provider_label}</Badge>
+        )}
         <span className="muted">{run.model}</span>
         {run.provider === "manual_import" && <Badge tone="muted">importado manualmente</Badge>}
         {run.provider === "claude_mcp" && <Badge tone="info">vía su suscripción de Claude (MCP)</Badge>}
@@ -269,8 +293,8 @@ function RunView({
       {run.output && <Markdown source={run.output} />}
       {run.provider !== "manual_import" && run.provider !== "claude_mcp" && (
         <div className="small muted">
-          Uso medido por Anthropic: {String(usage.input_tokens ?? "—")} tokens de entrada ·{" "}
-          {String(usage.output_tokens ?? "—")} de salida
+          Uso medido por {run.provider_label ?? "el proveedor"}: {String(usage.input_tokens ?? "—")} tokens de
+          entrada · {String(usage.output_tokens ?? "—")} de salida
           {usage.context_token_estimate
             ? ` · contexto ~${usage.context_token_estimate} tokens (estimación)`
             : ""}

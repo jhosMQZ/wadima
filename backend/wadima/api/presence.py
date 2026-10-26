@@ -258,13 +258,13 @@ def integrations_status(db: Session) -> list[dict]:
         "not_configured": "Sin credenciales de Google",
     }[drive["status"]]
     out.append({"key": "drive", "label": "Google Drive", "status": drive_status, "detail": detail})
-    creds = db.execute(select(AICredential.status).where(AICredential.provider == "anthropic_api")).scalars().all()
+    creds = db.execute(select(AICredential.status)).scalars().all()
     verified = sum(1 for c in creds if c == "verified")
     failing = sum(1 for c in creds if c == "error")
     out.append(
         {
             "key": "claude_api",
-            "label": "Claude (API)",
+            "label": "IA por API (Claude, OpenAI, Gemini, DeepSeek…)",
             "status": "error" if failing else "ok" if verified else "off",
             "detail": f"{verified} clave(s) verificada(s)" + (f", {failing} con error" if failing else ""),
         }

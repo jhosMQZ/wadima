@@ -2,11 +2,14 @@ import { useState, type FormEvent } from "react";
 import { del, patch, post, put } from "../api/client";
 import { Badge, ConfirmDialog, ErrorBox, Spinner } from "../components/ui";
 import { formatDateTime } from "../lib/format";
+import { CRED_STATUS as STATUS } from "../lib/labels";
 import { toast } from "../lib/toast";
 import { useApi } from "../lib/useApi";
 
 export interface Credential {
   provider: string;
+  provider_label: string;
+  base_url: string | null;
   label: string;
   key_hint: string;
   status: string;
@@ -18,18 +21,27 @@ export interface Credential {
   last_error: string;
 }
 
-export interface CredentialsResponse {
-  mine: Credential | null;
-  partners: { user_id: string; display_name: string; status: string }[];
+export interface ProviderMeta {
+  key: string;
+  label: string;
+  short: string;
+  key_placeholder: string;
+  console_url: string;
+  console_label: string;
+  supports_effort: boolean;
+  supports_count_tokens: boolean;
+  needs_base_url: boolean;
+  note: string;
 }
 
-const STATUS: Record<string, [string, string]> = {
-  verified: ["verificada", "ok"],
-  unverified: ["sin verificar", "warn"],
-  error: ["error", "err"],
-  revoked: ["eliminada", "muted"],
-  not_configured: ["sin configurar", "muted"],
-};
+export interface CredentialsResponse {
+  /** Conexión con Claude (Anthropic), por compatibilidad. */
+  mine: Credential | null;
+  /** Todas mis conexiones (cualquier proveedor), sin las eliminadas. */
+  providers: Credential[];
+  catalog: ProviderMeta[];
+  partners: { user_id: string; display_name: string; status: string; apis: string[] }[];
+}
 
 export function ClaudeConnections() {
   const { data, error, reload } = useApi<CredentialsResponse>("/api/ai/credentials", {
@@ -181,7 +193,8 @@ export function ClaudeConnections() {
         <div className="panel">
           <h3>Conexiones de los socios</h3>
           <p className="small muted">
-            Solo se muestra el estado; ningún socio puede ver ni usar la cuenta de otro.
+            Estado de Claude y de las demás APIs verificadas. Solo se muestra el estado; ningún socio puede
+            ver ni usar la cuenta de otro.
           </p>
           <ul className="list">
             {data.partners.map((p) => {
@@ -189,6 +202,7 @@ export function ClaudeConnections() {
               return (
                 <li key={p.user_id} className="row">
                   <span style={{ flex: 1 }}>{p.display_name}</span>
+                  {p.apis.length > 0 && <span className="small muted">{p.apis.join(" · ")}</span>}
                   <Badge tone={t}>{l}</Badge>
                 </li>
               );

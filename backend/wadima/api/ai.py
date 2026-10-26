@@ -1,6 +1,6 @@
-"""Conexiones de cada socio con Claude y ejecuciones de agentes.
+"""Conexiones de cada socio con la IA (Claude, OpenAI, Gemini, DeepSeek o APIs compatibles) y ejecuciones.
 
-Cada socio usa su propia API key de Anthropic (Claude Console). Las claves se guardan cifradas, nunca se
+Cada socio usa sus propias API keys. Las claves se guardan cifradas, nunca se
 devuelven al cliente y nunca se usan para peticiones de otro socio. Las ejecuciones son privadas de su
 autor hasta que este las comparte explícitamente con un área o proyecto.
 """
@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from wadima import audit
 from wadima.activity import log_activity
-from wadima.ai import anthropic_provider as provider
+from wadima.ai import providers
 from wadima.api.serial import iso
 from wadima.config import get_settings
 from wadima.db import get_db
@@ -32,7 +32,16 @@ from wadima.services import jobs
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
-PROVIDER = "anthropic_api"
+PROVIDER = providers.ANTHROPIC  # proveedor por defecto (compatibilidad con clientes anteriores)
+
+
+_OTHER_LABELS = {"claude_mcp": "Claude (suscripción vía MCP)", "manual_import": "un resultado importado"}
+
+
+def _label(provider: str) -> str:
+    if provider in providers.CATALOG:
+        return providers.CATALOG[provider].label
+    return _OTHER_LABELS.get(provider, provider)
 
 
 def cred_out(c: AICredential | None) -> dict | None:
@@ -40,10 +49,12 @@ def cred_out(c: AICredential | None) -> dict | None:
         return None
     return {
         "provider": c.provider,
+        "provider_label": _label(c.provider),
         "label": c.label,
         "key_hint": c.key_hint,
         "status": c.status,
-        "default_model": c.default_model or provider.DEFAULT_MODEL,
+        "base_url": c.base_url or None,
+        "default_model": c.default_model or providers.DEFAULT_MODEL.get(c.provider, ""),
         "models": (c.account_info or {}).get("models", []),
         "organization_id": (c.account_info or {}).get("organization_id"),
         "rate_limits": c.rate_limits or {},
@@ -58,6 +69,7 @@ def run_out(r: AIRun, include_prompt: bool = True) -> dict:
         "id": str(r.id),
         "user_id": str(r.user_id),
         "provider": r.provider,
+        "provider_label": _label(r.provider),
         "model": r.model,
         "prompt": r.prompt if include_prompt else r.prompt[:200],
         "context_refs": r.context_refs,
@@ -73,44 +85,76 @@ def run_out(r: AIRun, include_prompt: bool = True) -> dict:
     }
 
 
-def _my_cred(db: Session, principal: Principal) -> AICredential | None:
+def _check_provider(provider: str) -> str:
+    if provider not in providers.CATALOG:
+        raise HTTPException(422, "Proveedor de IA desconocido")
+    return provider
+
+
+def _my_cred(db: Session, principal: Principal, provider: str = PROVIDER) -> AICredential | None:
     return db.execute(
-        select(AICredential).where(AICredential.user_id == principal.id, AICredential.provider == PROVIDER)
+        select(AICredential).where(AICredential.user_id == principal.id, AICredential.provider == provider)
     ).scalar_one_or_none()
+
+
+def _my_creds(db: Session, principal: Principal) -> list[AICredential]:
+    rows = db.execute(select(AICredential).where(AICredential.user_id == principal.id)).scalars().all()
+    order = list(providers.CATALOG)
+    return sorted((c for c in rows if c.provider in providers.CATALOG), key=lambda c: order.index(c.provider))
+
+
+def _usable_cred(db: Session, principal: Principal, provider: str | None) -> AICredential:
+    """Credencial verificada del proveedor pedido; sin proveedor, Claude si está verificado o la primera verificada."""
+    if provider:
+        cred = _my_cred(db, principal, _check_provider(provider))
+        if cred is None or cred.status != "verified" or not cred.secret_encrypted:
+            raise HTTPException(400, f"Conecte y verifique primero su propia API key de {_label(provider)}")
+        return cred
+    usable = [c for c in _my_creds(db, principal) if c.status == "verified" and c.secret_encrypted]
+    if not usable:
+        raise HTTPException(400, "Conecte y verifique primero su propia API key de Anthropic u otro proveedor")
+    return usable[0]
 
 
 def _apply_verification(cred: AICredential, api_key: str) -> None:
     try:
-        info = provider.verify_key(api_key)
-    except provider.ProviderError as exc:
+        result = providers.verify(cred.provider, api_key, cred.base_url)
+    except providers.ProviderError as exc:
         cred.status = "error"
         cred.last_error = str(exc)
         return
     cred.status = "verified"
     cred.verified_at = now_utc()
     cred.last_error = ""
-    cred.account_info = {"models": info["models"], "organization_id": info["organization_id"]}
-    cred.rate_limits = info["rate_limits"]
-    model_ids = {m["id"] for m in info["models"]}
+    cred.account_info = {"models": result["models"], "organization_id": result["organization_id"]}
+    cred.rate_limits = result["rate_limits"]
+    model_ids = [m["id"] for m in result["models"]]
     if not cred.default_model or (model_ids and cred.default_model not in model_ids):
-        cred.default_model = (
-            provider.DEFAULT_MODEL if provider.DEFAULT_MODEL in model_ids or not model_ids else sorted(model_ids)[0]
-        )
+        cred.default_model = providers.pick_default(cred.provider, model_ids)
 
 
 # --------------------------------------------------------------------------- credenciales
 @router.get("/credentials")
 def my_credentials(principal: Principal = Depends(require_password_ok), db: Session = Depends(get_db)):
     users = db.execute(select(User).where(User.is_active).order_by(User.created_at, User.username)).scalars().all()
-    creds = {c.user_id: c for c in db.execute(select(AICredential).where(AICredential.provider == PROVIDER)).scalars()}
+    all_creds = db.execute(select(AICredential)).scalars().all()
+    claude = {c.user_id: c for c in all_creds if c.provider == PROVIDER}
+    verified: dict[uuid.UUID, list[str]] = {}
+    for c in all_creds:
+        if c.status == "verified" and c.provider in providers.CATALOG:
+            verified.setdefault(c.user_id, []).append(providers.CATALOG[c.provider].short)
     return {
-        "mine": cred_out(creds.get(principal.id)),
+        # «mine» se mantiene por compatibilidad: es la conexión con Claude (Anthropic).
+        "mine": cred_out(claude.get(principal.id)),
+        "providers": [cred_out(c) for c in _my_creds(db, principal) if c.status != "revoked"],
+        "catalog": providers.catalog_out(),
         # De los demás socios solo se muestra el estado, nunca datos de su cuenta.
         "partners": [
             {
                 "user_id": str(u.id),
                 "display_name": u.display_name,
-                "status": creds[u.id].status if u.id in creds else "not_configured",
+                "status": claude[u.id].status if u.id in claude else "not_configured",
+                "apis": sorted(verified.get(u.id, [])),
             }
             for u in users
         ],
@@ -118,8 +162,10 @@ def my_credentials(principal: Principal = Depends(require_password_ok), db: Sess
 
 
 class CredentialIn(BaseModel):
-    api_key: str = Field(min_length=20, max_length=300)
+    api_key: str = Field(min_length=1, max_length=400)
     label: str = Field(default="", max_length=80)
+    provider: str = Field(default=PROVIDER, max_length=30)
+    base_url: str = Field(default="", max_length=300)
 
 
 @router.put("/credentials")
@@ -129,21 +175,28 @@ def set_credential(
     principal: Principal = Depends(require_password_ok),
     db: Session = Depends(get_db),
 ):
-    key = body.api_key.strip()
-    if not key.startswith("sk-ant-"):
-        raise HTTPException(
-            422,
-            "Formato de API key no reconocido (debe empezar por «sk-ant-»; se obtiene en "
-            "platform.claude.com, no en la suscripción de claude.ai)",
+    provider = _check_provider(body.provider)
+    meta = providers.CATALOG[provider]
+    if provider != providers.COMPATIBLE and len(body.api_key.strip()) < 20:
+        raise HTTPException(422, "La API key es demasiado corta")
+    try:
+        key = providers.validate_key(provider, body.api_key)
+        base_url = (
+            providers.normalize_base_url(body.base_url, allow_local=principal.is_admin)
+            if meta.needs_base_url
+            else ""
         )
-    if key.startswith("sk-ant-admin"):
-        raise HTTPException(422, "Esa es una clave de administración; use una API key normal")
-    cred = _my_cred(db, principal)
+    except providers.ProviderError as exc:
+        raise HTTPException(403 if exc.kind == "permission" else 422, str(exc)) from exc
+    cred = _my_cred(db, principal, provider)
     if cred is None:
-        cred = AICredential(user_id=principal.id, provider=PROVIDER)
+        cred = AICredential(user_id=principal.id, provider=provider)
         db.add(cred)
+    if (cred.base_url or "") != base_url:
+        cred.default_model = ""  # otro servicio: otra lista de modelos
+    cred.base_url = base_url
     cred.secret_encrypted = encrypt_secret(key)
-    cred.key_hint = f"…{key[-4:]}"
+    cred.key_hint = f"…{key[-4:]}" if len(key) >= 8 else "…"
     cred.label = body.label
     cred.status = "unverified"
     _apply_verification(cred, key)
@@ -153,7 +206,7 @@ def set_credential(
         actor_id=principal.id,
         target_type="ai_credential",
         ip=client_ip(request),
-        data={"provider": PROVIDER, "key_hint": cred.key_hint, "status": cred.status},
+        data={"provider": provider, "key_hint": cred.key_hint, "status": cred.status, "base_url": base_url or None},
     )
     emit(db, "ai.changed", everyone=True)
     db.commit()
@@ -161,10 +214,12 @@ def set_credential(
 
 
 @router.post("/credentials/test")
-def test_credential(principal: Principal = Depends(require_password_ok), db: Session = Depends(get_db)):
-    cred = _my_cred(db, principal)
+def test_credential(
+    provider: str = PROVIDER, principal: Principal = Depends(require_password_ok), db: Session = Depends(get_db)
+):
+    cred = _my_cred(db, principal, _check_provider(provider))
     if cred is None or not cred.secret_encrypted:
-        raise HTTPException(400, "No ha configurado una API key de Anthropic")
+        raise HTTPException(400, f"No ha configurado una API key de {_label(provider)}")
     _apply_verification(cred, decrypt_secret(cred.secret_encrypted))
     emit(db, "ai.changed", everyone=True)
     db.commit()
@@ -172,15 +227,16 @@ def test_credential(principal: Principal = Depends(require_password_ok), db: Ses
 
 
 class CredentialPatch(BaseModel):
-    default_model: str | None = Field(default=None, max_length=60)
+    default_model: str | None = Field(default=None, max_length=200)
     label: str | None = Field(default=None, max_length=80)
+    provider: str = Field(default=PROVIDER, max_length=30)
 
 
 @router.patch("/credentials")
 def update_credential(
     body: CredentialPatch, principal: Principal = Depends(require_password_ok), db: Session = Depends(get_db)
 ):
-    cred = _my_cred(db, principal)
+    cred = _my_cred(db, principal, _check_provider(body.provider))
     if cred is None:
         raise HTTPException(404, "No hay conexión configurada")
     if body.default_model is not None:
@@ -196,9 +252,12 @@ def update_credential(
 
 @router.delete("/credentials")
 def delete_credential(
-    request: Request, principal: Principal = Depends(require_password_ok), db: Session = Depends(get_db)
+    request: Request,
+    provider: str = PROVIDER,
+    principal: Principal = Depends(require_password_ok),
+    db: Session = Depends(get_db),
 ):
-    cred = _my_cred(db, principal)
+    cred = _my_cred(db, principal, _check_provider(provider))
     if cred is None:
         raise HTTPException(404, "No hay conexión configurada")
     hint = cred.key_hint
@@ -212,15 +271,20 @@ def delete_credential(
         actor_id=principal.id,
         target_type="ai_credential",
         ip=client_ip(request),
-        data={"key_hint": hint},
+        data={"provider": provider, "key_hint": hint},
     )
     emit(db, "ai.changed", everyone=True)
     db.commit()
-    return {
-        "ok": True,
-        "note": "La clave se borró de WADIMA. Para invalidarla en Anthropic, revóquela en "
-        "platform.claude.com → API keys.",
-    }
+    meta = providers.CATALOG[provider]
+    if provider == PROVIDER:
+        note = (
+            "La clave se borró de WADIMA. Para invalidarla en Anthropic, revóquela en platform.claude.com → API keys."
+        )
+    elif meta.console_label:
+        note = f"La clave se borró de WADIMA. Para invalidarla en {meta.label}, revóquela en {meta.console_label}."
+    else:
+        note = "La clave se borró de WADIMA. Para invalidarla, revóquela también en el panel del servicio."
+    return {"ok": True, "note": note}
 
 
 # --------------------------------------------------------------------------- ejecuciones
@@ -229,16 +293,15 @@ class RunIn(BaseModel):
     area_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
     use_memory: bool = True
-    model: str | None = Field(default=None, max_length=60)
+    provider: str | None = Field(default=None, max_length=30)
+    model: str | None = Field(default=None, max_length=200)
     effort: str = Field(default="medium", pattern="^(low|medium|high|xhigh|max)$")
     context_budget: int = Field(default=3000, ge=200, le=20000)
 
 
 @router.post("/runs")
 def create_run(body: RunIn, principal: Principal = Depends(require_password_ok), db: Session = Depends(get_db)):
-    cred = _my_cred(db, principal)
-    if cred is None or cred.status != "verified" or not cred.secret_encrypted:
-        raise HTTPException(400, "Conecte y verifique primero su propia API key de Anthropic")
+    cred = _usable_cred(db, principal, body.provider)
     area_ids = accessible_area_ids(db, principal)
     if body.area_id:
         require_area(db, principal, body.area_id)
@@ -247,12 +310,18 @@ def create_run(body: RunIn, principal: Principal = Depends(require_password_ok),
         p = db.get(Project, body.project_id)
         if p is None or p.area_id not in accessible_area_ids(db, principal):
             raise HTTPException(404, "Proyecto no encontrado")
+    if body.model:
+        available = {m["id"] for m in (cred.account_info or {}).get("models", [])}
+        if available and body.model not in available:
+            raise HTTPException(422, f"Ese modelo no está disponible en su cuenta de {_label(cred.provider)}")
     retrieved = {"items": [], "context": "", "token_estimate": 0, "contradictions": []}
     if body.use_memory:
         retrieved = retrieve(
             db, area_ids, body.prompt, project_id=body.project_id, limit=8, token_budget=body.context_budget
         )
-    model = body.model or cred.default_model or provider.DEFAULT_MODEL
+    model = body.model or cred.default_model or providers.DEFAULT_MODEL.get(cred.provider, "")
+    if not model:
+        raise HTTPException(400, f"Elija un modelo para {_label(cred.provider)} (pruebe la conexión de nuevo)")
     refs = [
         {
             "n": i + 1,
@@ -268,7 +337,7 @@ def create_run(body: RunIn, principal: Principal = Depends(require_password_ok),
         credential_id=cred.id,
         area_id=body.area_id,
         project_id=body.project_id,
-        provider=PROVIDER,
+        provider=cred.provider,
         model=model,
         prompt=body.prompt,
         context_refs=refs,
@@ -278,10 +347,16 @@ def create_run(body: RunIn, principal: Principal = Depends(require_password_ok),
     db.commit()
     api_key = decrypt_secret(cred.secret_encrypted)
     try:
-        result = provider.run_message(
-            api_key, body.prompt, context=retrieved["context"], model=model, effort=body.effort
+        result = providers.run(
+            cred.provider,
+            api_key,
+            body.prompt,
+            context=retrieved["context"],
+            model=model,
+            effort=body.effort,
+            base_url=cred.base_url,
         )
-    except provider.ProviderError as exc:
+    except providers.ProviderError as exc:
         run.status = "error"
         run.error = str(exc)
         run.finished_at = now_utc()
@@ -295,7 +370,7 @@ def create_run(body: RunIn, principal: Principal = Depends(require_password_ok),
             status, {"message": str(exc), "kind": exc.kind, "run_id": str(run.id), "retry_after": exc.retry_after}
         ) from exc
     run.output = result.text
-    run.model = result.model
+    run.model = (result.model or model)[:200]
     run.usage = {
         **result.usage,
         "context_token_estimate": retrieved["token_estimate"],
@@ -361,7 +436,7 @@ def share_run(
     log_activity(
         db,
         "ai.result",
-        f"Compartió un resultado de Claude: {r.prompt[:120]}",
+        f"Compartió un resultado de {_label(r.provider)}: {r.prompt[:120]}",
         user=principal.user,
         area_id=body.area_id,
         project_id=body.project_id,
@@ -404,17 +479,29 @@ def import_result(body: ImportIn, principal: Principal = Depends(require_passwor
 class CountIn(BaseModel):
     text: str | None = Field(default=None, max_length=2_000_000)
     document_version_id: uuid.UUID | None = None
-    model: str | None = None
+    model: str | None = Field(default=None, max_length=200)
+    provider: str | None = Field(default=None, max_length=30)
 
 
 @router.post("/count-tokens")
 def count(body: CountIn, principal: Principal = Depends(require_password_ok), db: Session = Depends(get_db)):
-    """Medición real con count_tokens (sin generar respuesta). Para un documento compara original y Markdown."""
-    cred = _my_cred(db, principal)
-    if cred is None or cred.status != "verified" or not cred.secret_encrypted:
-        raise HTTPException(400, "Se necesita una API key verificada para medir tokens con el proveedor")
+    """Medición real del proveedor (sin generar respuesta). Para un documento compara original y Markdown.
+    Solo Anthropic y Gemini ofrecen este recuento; con los demás se informa en lugar de estimar."""
+    if body.provider:
+        cred = _usable_cred(db, principal, body.provider)
+    else:
+        countable = [
+            c
+            for c in _my_creds(db, principal)
+            if c.status == "verified" and c.secret_encrypted and providers.CATALOG[c.provider].supports_count_tokens
+        ]
+        if not countable:
+            raise HTTPException(
+                400, "Se necesita una API key verificada de Anthropic o Gemini para medir tokens con el proveedor"
+            )
+        cred = countable[0]
     key = decrypt_secret(cred.secret_encrypted)
-    model = body.model or cred.default_model or provider.DEFAULT_MODEL
+    model = body.model or cred.default_model or providers.DEFAULT_MODEL.get(cred.provider, "")
     try:
         if body.document_version_id:
             v = db.get(DocumentVersion, body.document_version_id)
@@ -424,10 +511,11 @@ def count(body: CountIn, principal: Principal = Depends(require_password_ok), db
 
             doc = db.get(Document, v.document_id)
             require_area(db, principal, doc.area_id)
-            original = provider.count_tokens(key, v.plain_text or "", model) if v.plain_text else 0
-            markdown = provider.count_tokens(key, v.markdown or "", model) if v.markdown else 0
+            original = providers.count_tokens(cred.provider, key, v.plain_text or "", model) if v.plain_text else 0
+            markdown = providers.count_tokens(cred.provider, key, v.markdown or "", model) if v.markdown else 0
             report = dict(v.report or {})
             report["token_measurement"] = {
+                "provider": cred.provider,
                 "model": model,
                 "original": original,
                 "markdown": markdown,
@@ -439,8 +527,13 @@ def count(body: CountIn, principal: Principal = Depends(require_password_ok), db
             return report["token_measurement"]
         if not body.text:
             raise HTTPException(422, "Indique un texto o una versión de documento")
-        return {"model": model, "input_tokens": provider.count_tokens(key, body.text, model), "method": "count_tokens"}
-    except provider.ProviderError as exc:
+        return {
+            "provider": cred.provider,
+            "model": model,
+            "input_tokens": providers.count_tokens(cred.provider, key, body.text, model),
+            "method": "count_tokens",
+        }
+    except providers.ProviderError as exc:
         raise HTTPException(400 if exc.kind != "rate_limit" else 429, str(exc)) from exc
 
 
@@ -489,8 +582,9 @@ def _mcp_url() -> str:
 
 @router.get("/options")
 def options(principal: Principal = Depends(require_password_ok), db: Session = Depends(get_db)):
-    """Opciones de integración con Claude y su estado real para este socio."""
+    """Opciones de integración con la IA y su estado real para este socio."""
     cred = _my_cred(db, principal)
+    mine = {c.provider: c for c in _my_creds(db, principal)}
     tokens = (
         db.execute(
             select(MCPToken)
@@ -525,6 +619,17 @@ def options(principal: Principal = Depends(require_password_ok), db: Session = D
             "tokens": [token_out(t) for t in tokens],
         },
         "manual_import": {"status": "available"},
+        # Otras APIs de IA con clave propia (OpenAI, Gemini, DeepSeek, compatibles con OpenAI).
+        "other_apis": [
+            {
+                "provider": key,
+                "label": meta.label,
+                "status": mine[key].status if key in mine else "not_configured",
+                "key_hint": mine[key].key_hint if key in mine else None,
+            }
+            for key, meta in providers.CATALOG.items()
+            if key != PROVIDER
+        ],
     }
 
 

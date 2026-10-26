@@ -17,6 +17,17 @@ os.environ["WADIMA_ENV"] = "test"
 os.environ["WADIMA_DATA_DIR"] = str(_tmp)
 os.environ["WADIMA_MASTER_KEY"] = "test-master-key-not-secret"
 os.environ["WADIMA_EMBEDDED_WORKERS"] = "false"
+# Las pruebas usan el cliente HTTP local: no deben heredar la publicación real del servidor (.env con HTTPS,
+# Tailscale o red local), que cambiaría las cookies, los orígenes y la interfaz de escucha.
+os.environ["WADIMA_COOKIE_SECURE"] = "false"
+os.environ["WADIMA_PUBLIC_ORIGIN"] = "http://127.0.0.1:8000"
+os.environ["WADIMA_PREVIEW_PUBLIC_ORIGIN"] = "http://127.0.0.1:8001"
+os.environ["WADIMA_ALLOWED_ORIGINS"] = (
+    '["http://127.0.0.1:8000","http://localhost:8000","http://127.0.0.1:5173","http://localhost:5173"]'
+)
+os.environ["WADIMA_BIND_HOST"] = "127.0.0.1"
+os.environ["WADIMA_TLS_CERT_FILE"] = ""
+os.environ["WADIMA_TLS_KEY_FILE"] = ""
 
 from wadima.config import get_settings  # noqa: E402
 

@@ -33,6 +33,14 @@ const env = {
   WADIMA_PREVIEW_PUBLIC_ORIGIN: `http://127.0.0.1:${PREVIEW_PORT}`,
   WADIMA_STUDIO_PORT_RANGE_START: "5400",
   WADIMA_STUDIO_PORT_RANGE_END: "5420",
+  // Aislado de la instalación real: sin las credenciales OAuth de Google ni la publicación (HTTPS, Tailscale,
+  // red local) que pueda tener el .env de este equipo.
+  WADIMA_GOOGLE_CLIENT_ID: "",
+  WADIMA_GOOGLE_CLIENT_SECRET: "",
+  WADIMA_COOKIE_SECURE: "false",
+  WADIMA_BIND_HOST: "127.0.0.1",
+  WADIMA_TLS_CERT_FILE: "",
+  WADIMA_TLS_KEY_FILE: "",
 } as Record<string, string>;
 
 export default defineConfig({

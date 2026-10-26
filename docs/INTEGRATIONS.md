@@ -1,4 +1,4 @@
-# Integraciones: Google Drive y Claude
+# Integraciones: Google Drive, Claude y otras IA
 
 Estado al 2026-10-25: ambas integraciones están implementadas y probadas **contra servidores simulados**
 (`backend/tests/fakedrive.py` y el transporte simulado de `test_ai.py`). Ninguna se ha conectado todavía a una
@@ -158,3 +158,36 @@ Seguridad del endpoint: token Bearer obligatorio, rechazo de cualquier `Origin` 
 Los errores de la API se traducen a mensajes comprensibles por tipo: clave inválida o revocada (la conexión pasa
 a «error»), permisos, límite de uso (429 con `retry-after`), red, modelo inexistente, error del servidor y
 negativa del modelo.
+
+## Otras APIs de IA (OpenAI, Google Gemini, DeepSeek y compatibles con OpenAI)
+
+Además de Claude, cada socio puede conectar **sus propias claves** de otros servicios en **Configuración de IA → Otras
+APIs de IA**. Se aplican las mismas reglas que con Anthropic: la clave se cifra en el servidor, nunca vuelve al
+navegador (solo una pista), solo se usa para las peticiones de su dueño y la conexión aparece como verificada
+únicamente después de una comprobación real.
+
+| Proveedor | Clave | Verificación (sin coste) | Preguntas | Recuento de tokens |
+|---|---|---|---|---|
+| **OpenAI** | `sk-…` de platform.openai.com (la suscripción de ChatGPT no incluye la API) | `GET /v1/models` | `POST /v1/chat/completions` | No disponible: WADIMA no lo estima |
+| **Google Gemini** | clave de Google AI Studio | `GET /v1beta/models` | `POST /v1beta/models/{modelo}:generateContent` | `:countTokens` |
+| **DeepSeek** | `sk-…` de platform.deepseek.com | `GET https://api.deepseek.com/models` | `POST https://api.deepseek.com/chat/completions` | No disponible |
+| **Compatible con OpenAI** | la del servicio (OpenRouter, Groq, Mistral, Together…) | `GET {dirección}/models` | `POST {dirección}/chat/completions` | No disponible |
+
+- **Modelos:** la lista sale de la propia cuenta al verificar la clave. Se ocultan los que no sirven para conversar
+  (embeddings, audio, imagen), y el modelo por defecto se elige de esa lista; el socio puede cambiarlo.
+- **Contexto e instrucciones:** igual que con Claude. Las fuentes de la memoria viajan como datos no confiables y el
+  modelo no recibe herramientas. En Gemini, las partes de razonamiento interno (`thought`) no se muestran como
+  respuesta.
+- **Esfuerzo:** el selector `low`…`max` solo existe en Anthropic. En los demás no se envía límite de tokens ni
+  parámetros de razonamiento: cada modelo aplica los suyos y así se evitan rechazos por parámetros no admitidos.
+- **Errores:** clave inválida (en Gemini llega como `400 API_KEY_INVALID`), permisos, saldo insuficiente (DeepSeek:
+  `402`), límite de uso (`429` con `retry-after`), modelo inexistente, red y negativas del modelo (`refusal` o
+  `content_filter` en OpenAI; `SAFETY` y bloqueos del prompt en Gemini).
+- **APIs compatibles y seguridad:** para que el servidor no se pueda usar para alcanzar la red interna, la dirección
+  debe ser `https://` hacia un servicio público. Se rechazan IP privadas, de enlace local o de metadatos, nombres
+  que resuelven a la red interna, credenciales en la URL y parámetros. `http://127.0.0.1` / `localhost` (Ollama,
+  LM Studio en el propio equipo de WADIMA) solo puede configurarlo un administrador.
+- **Probado aquí:** con servidores simulados que reproducen el formato documentado de cada API
+  (`backend/tests/test_ai_providers.py`) y una prueba de navegador para las tarjetas y la validación local. Sin
+  claves reales de esos servicios en este equipo, la conexión real con cada uno queda por comprobar con la clave
+  de cada socio.
