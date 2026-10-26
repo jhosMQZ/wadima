@@ -1,0 +1,13 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "charliermarsh.ruff",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "ms-playwright.playwright",
+    "redhat.vscode-yaml",
+    "editorconfig.editorconfig"
+  ],
+  "unwantedRecommendations": ["ritwickdey.liveserver"]
+}

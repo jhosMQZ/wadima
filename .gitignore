@@ -1,0 +1,33 @@
+# Secretos y configuración local
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.dpapi
+
+# Datos de ejecución (base local, blobs, proyectos de Studio, logs)
+var/
+backend/var/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+*.tsbuildinfo
+
+# Editor / SO
+.DS_Store
+Thumbs.db
+.idea/

@@ -1,0 +1,68 @@
+[project]
+name = "wadima"
+version = "0.1.0"
+description = "WADIMA - workspace colaborativo local-first con oficina virtual pixel art"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy>=2.0.36",
+    "psycopg[binary]>=3.2",
+    "alembic>=1.14",
+    "pydantic-settings>=2.6",
+    "argon2-cffi>=23.1",
+    "cryptography>=43",
+    "httpx>=0.28",
+    "python-multipart>=0.0.18",
+    "websockets>=14",
+    "pymupdf>=1.25",
+    "openpyxl>=3.1.5",
+    "xlrd>=2.0.1",
+    "python-docx>=1.1.2",
+    "python-pptx>=1.0.2",
+    "defusedxml>=0.7.1",
+    "pyyaml>=6.0.2",
+    "anthropic>=0.40",
+    "merge3>=0.0.16",
+    "mcp>=1.20",
+    "tzdata>=2024.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[project.scripts]
+wadima = "wadima.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["wadima"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM"]
+ignore = [
+    "S101",  # assert en tests
+    "B008",  # Depends() en argumentos por defecto (patrón FastAPI)
+    "S603",  # subprocess sin shell: revisado manualmente
+    "S607",  # rutas parciales de ejecutables (git, npm) resueltas con shutil.which
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106", "S108", "S311"]
+"migrations/versions/*" = ["E501", "W291"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["network: requiere acceso a internet (p. ej. instalar dependencias npm)"]
+filterwarnings = ["ignore::DeprecationWarning:pymupdf.*"]
